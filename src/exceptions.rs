@@ -1,28 +1,42 @@
 use std::fmt::Debug;
+use crate::exceptions::codes::{EOF_ERROR, INVALID_ARG_TYPE, INVALID_IDENTIFIER, INVALID_OP, INVALID_VAR_TYPE, IO_ERROR, OUT_OF_MEMORY, SEGFAULT, VAR_NOT_FOUND};
+
+mod codes {
+    pub const SEGFAULT: u32 = 0xC000_0005;
+    pub const VAR_NOT_FOUND: u32 = 0xD000_0005;
+    pub const INVALID_OP: u32 = 0x0000_000A;
+    pub const SIZE_MISMATCH: u32 = 0x0000_000B;
+    pub const INVALID_VAR_TYPE: u32 = 0x0000_000C;
+    pub const INVALID_ARG_TYPE: u32 = 0x0000_000D;
+    pub const OUT_OF_MEMORY: u32 = 0x0000_000E;
+    pub const IO_ERROR: u32 = 0x0000_000F;
+    pub const EOF_ERROR: u32 = 0x0000_0010;
+    pub const INVALID_IDENTIFIER: u32 = 0x0000_0011;
+}
 
 #[repr(u32)]  // 底层整数表示
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     #[error("Segmentation fault: {0} (code {self:#X})")]
-    SegFault(String) = 0xC000_0005u32,
+    SegFault(String) = SEGFAULT,
     #[error("Variable not found: {0} (code {self:#X})")]
-    VarNotFound(String) = 0xD000_0005u32,
+    VarNotFound(String) = VAR_NOT_FOUND,
     #[error("Invalid operation: {0} (code {self:#X})")]
-    InvalidOperation(String) = 0x0000_000Au32,
+    InvalidOperation(String) = INVALID_OP,
     #[error("Size mismatch: {0} (code {self:#X})")]
-    SizeMismatch(String),
+    SizeMismatch(String) = codes::SIZE_MISMATCH,
     #[error("Invalid argument type: {0} (code {self:#X})")]
-    InvalidArgType(String),
+    InvalidArgType(String) = INVALID_ARG_TYPE,
     #[error("Invalid variable type: {0} (code {self:#X})")]
-    InvalidVarType(String),
+    InvalidVarType(String) = INVALID_VAR_TYPE,
     #[error("Out of memory: {0} (code {self:#X})")]
-    OutOfMemory(String),
+    OutOfMemory(String) = OUT_OF_MEMORY,
     #[error("IOError: {0} (code {self:#X})")]
-    IOError(String),
+    IOError(String) = IO_ERROR,
     #[error("IOError: {0} (code {self:#X})")]
-    EOFError(String),
+    EOFError(String) = EOF_ERROR,
     #[error("Invalid identifier: {0} (code {self:#X})")]
-    InvalidIdentifier(String),
+    InvalidIdentifier(String) = INVALID_IDENTIFIER,
     #[error("Unrecognized error: {0} (code {1:#X})")]
     UnrecognizedError(String, u32),
 }
@@ -30,16 +44,16 @@ pub enum Error {
 impl Error {
     pub const fn code(&self) -> u32 {
         match self {
-            Self::SegFault(_) => 0xC000_0005,
-            Self::VarNotFound(_) => 0xD000_0005,
-            Self::InvalidOperation(_) => 0x0000_000A,
-            Self::SizeMismatch(_) => 0x0000_000B,
-            Self::InvalidVarType(_) => 0x0000_000C,
-            Self::InvalidArgType(_) => 0x0000_000D,
-            Self::OutOfMemory(_) => 0x0000_000E,
-            Self::IOError(_) => 0x0000_000F,
-            Self::EOFError(_) => 0x0000_0010,
-            Self::InvalidIdentifier(_) => 0x0000_0011,
+            Self::SegFault(_) => SEGFAULT,
+            Self::VarNotFound(_) => VAR_NOT_FOUND,
+            Self::InvalidOperation(_) => INVALID_OP,
+            Self::SizeMismatch(_) => codes::SIZE_MISMATCH,
+            Self::InvalidArgType(_) => INVALID_ARG_TYPE,
+            Self::InvalidVarType(_) => INVALID_VAR_TYPE,
+            Self::OutOfMemory(_) => OUT_OF_MEMORY,
+            Self::IOError(_) => IO_ERROR,
+            Self::EOFError(_) => EOF_ERROR,
+            Self::InvalidIdentifier(_) => INVALID_IDENTIFIER,
             Self::UnrecognizedError(_, code) => *code,
         }
     }
@@ -59,7 +73,7 @@ impl From<std::io::Error> for Error {
             std::io::ErrorKind::NotFound => Error::VarNotFound(err.to_string()),
             std::io::ErrorKind::InvalidData => Error::InvalidVarType(err.to_string()),
             _ => {
-                // 获取原始 OS 错误码（如果存在）
+                // 获取原始 OS 错误码
                 let code = err.raw_os_error().unwrap_or(0) as u32;
                 Error::UnrecognizedError(err.to_string(), code)
             }
