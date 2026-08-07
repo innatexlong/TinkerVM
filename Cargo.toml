@@ -1,3 +1,4 @@
+[workspace]
 [package]
 name = "customVMRust"
 version = "0.6.0-beta.dev.1"
