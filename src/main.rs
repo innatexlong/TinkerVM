@@ -1,21 +1,11 @@
-use crate::exceptions::Error;
-
 pub mod parser;
 pub mod exceptions;
 pub mod env;
 
-fn repl() -> () {}
+fn repl() -> () {}  // TODO
 
 // fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let file = match std::fs::File::open("123.txt") {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("打开文件失败: {}", e);
-            return Ok(());
-        }
-    };
-
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         repl()
@@ -46,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut writer = std::io::BufWriter::new(&mut compiled_bin);
         parser::compile_assembly(&mut reader, &mut writer)?;
     }
-    Ok(parser::run(&mut std::io::Cursor::new(&mut compiled_bin))?)
+    Ok(parser::run(&mut std::io::Cursor::new(&mut compiled_bin), &mut env::Env::new())?)
     //
     // let global_env = env::Env::new();
     //

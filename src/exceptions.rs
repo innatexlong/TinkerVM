@@ -1,6 +1,3 @@
-use std::fmt::Debug;
-use crate::exceptions::codes::{EOF_ERROR, INVALID_ARG_TYPE, INVALID_IDENTIFIER, INVALID_OP, INVALID_VAR_TYPE, IO_ERROR, OUT_OF_MEMORY, SEGFAULT, VAR_NOT_FOUND};
-
 mod codes {
     pub const SEGFAULT: u32 = 0xC000_0005;
     pub const VAR_NOT_FOUND: u32 = 0xD000_0005;
@@ -14,46 +11,45 @@ mod codes {
     pub const INVALID_IDENTIFIER: u32 = 0x0000_0011;
 }
 
-#[repr(u32)]  // 底层整数表示
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     #[error("Segmentation fault: {0} (code {self:#X})")]
-    SegFault(String) = SEGFAULT,
+    SegFault(String),
     #[error("Variable not found: {0} (code {self:#X})")]
-    VarNotFound(String) = VAR_NOT_FOUND,
+    VarNotFound(String),
     #[error("Invalid operation: {0} (code {self:#X})")]
-    InvalidOperation(String) = INVALID_OP,
+    InvalidOperation(String),
     #[error("Size mismatch: {0} (code {self:#X})")]
-    SizeMismatch(String) = codes::SIZE_MISMATCH,
+    SizeMismatch(String),
     #[error("Invalid argument type: {0} (code {self:#X})")]
-    InvalidArgType(String) = INVALID_ARG_TYPE,
+    InvalidArgType(String),
     #[error("Invalid variable type: {0} (code {self:#X})")]
-    InvalidVarType(String) = INVALID_VAR_TYPE,
+    InvalidVarType(String),
     #[error("Out of memory: {0} (code {self:#X})")]
-    OutOfMemory(String) = OUT_OF_MEMORY,
+    OutOfMemory(String),
     #[error("IOError: {0} (code {self:#X})")]
-    IOError(String) = IO_ERROR,
-    #[error("IOError: {0} (code {self:#X})")]
-    EOFError(String) = EOF_ERROR,
+    IOError(String),
+    #[error("EOFError: {0} (code {self:#X})")]
+    EOFError(String),
     #[error("Invalid identifier: {0} (code {self:#X})")]
-    InvalidIdentifier(String) = INVALID_IDENTIFIER,
-    #[error("Unrecognized error: {0} (code {1:#X})")]
+    InvalidIdentifier(String),
+    #[error("{0} (code {1:#X})")]
     UnrecognizedError(String, u32),
 }
 
 impl Error {
     pub const fn code(&self) -> u32 {
         match self {
-            Self::SegFault(_) => SEGFAULT,
-            Self::VarNotFound(_) => VAR_NOT_FOUND,
-            Self::InvalidOperation(_) => INVALID_OP,
+            Self::SegFault(_) => codes::SEGFAULT,
+            Self::VarNotFound(_) => codes::VAR_NOT_FOUND,
+            Self::InvalidOperation(_) => codes::INVALID_OP,
             Self::SizeMismatch(_) => codes::SIZE_MISMATCH,
-            Self::InvalidArgType(_) => INVALID_ARG_TYPE,
-            Self::InvalidVarType(_) => INVALID_VAR_TYPE,
-            Self::OutOfMemory(_) => OUT_OF_MEMORY,
-            Self::IOError(_) => IO_ERROR,
-            Self::EOFError(_) => EOF_ERROR,
-            Self::InvalidIdentifier(_) => INVALID_IDENTIFIER,
+            Self::InvalidArgType(_) => codes::INVALID_ARG_TYPE,
+            Self::InvalidVarType(_) => codes::INVALID_VAR_TYPE,
+            Self::OutOfMemory(_) => codes::OUT_OF_MEMORY,
+            Self::IOError(_) => codes::IO_ERROR,
+            Self::EOFError(_) => codes::EOF_ERROR,
+            Self::InvalidIdentifier(_) => codes::INVALID_IDENTIFIER,
             Self::UnrecognizedError(_, code) => *code,
         }
     }
@@ -72,6 +68,7 @@ impl From<std::io::Error> for Error {
             std::io::ErrorKind::OutOfMemory => Error::OutOfMemory(err.to_string()),
             std::io::ErrorKind::NotFound => Error::VarNotFound(err.to_string()),
             std::io::ErrorKind::InvalidData => Error::InvalidVarType(err.to_string()),
+            std::io::ErrorKind::UnexpectedEof => Error::EOFError(err.to_string()),
             _ => {
                 // 获取原始 OS 错误码
                 let code = err.raw_os_error().unwrap_or(0) as u32;

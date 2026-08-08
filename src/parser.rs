@@ -1,15 +1,54 @@
 use std::error;
 use crate::exceptions;
 
-pub fn func() -> Result<crate::env::TempVar, Box<dyn error::Error>> {
-
+pub fn func<R: std::io::BufRead>(input: &mut R) -> Result<crate::env::Var, Box<dyn error::Error>> {
+    loop {
+        match input.read_exact(&mut [0u8; 1]) {
+            Ok(()) => {},
+            Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof
+                => return Err(Box::from(exceptions::Error::EOFError("Unexpected EOF when running VM".to_string()))),
+            Err(err) => return Err(err.into())
+        };
+    }
 }
 
-pub fn run<R: std::io::Read>(input: &mut R) -> Result<(), Box<dyn error::Error>> {
-
+pub fn run<R: std::io::BufRead>(input: &mut R, env: &mut crate::env::Env) -> Result<crate::env::Var, Box<dyn error::Error>> {
+    // TODO: for the true main function
+    match func(input) {
+        Ok(crate::env::TempVar{ value: temp_val }) => {
+            match temp_val {
+                crate::env::TempValue::U32()
+            }
+        }
+    }
+    // match func(input) {
+    //     Ok(crate::env::TempVar { value: temp_val }) => {
+    //         match temp_val {
+    //             crate::env::TempValue::U32(value) => Ok(crate::env::TempValue::U32(value)),
+    //             crate::env::TempValue::Var(var_id) => {
+    //                 match env.get_var(var_id) {
+    //                     Ok(var) => match var.var_type {
+    //                         crate::env::VarType::VarPtr => {
+    //                             Err(
+    //                                Box::new(exceptions::Error::InvalidOperation(
+    //                                     format!("VarPtr (id={}) cannot convert to U32", var_id),
+    //                                 ))
+    //                             )
+    //                         }
+    //                         crate::env::VarType::U32 => {
+    //                             return env.memory_pool.
+    //                         }
+    //                     },
+    //                     Err(e) => Err(Box::from(e))
+    //                 }
+    //             },
+    //             // crate::env::TempValue::VarPtr(value) => Ok(crate::env::TempValue::VarPtr(value)),
+    //         }
+    //     }
+    // }
 }
 
-fn read_non_whitespace_byte<R: std::io::BufRead>(input: &mut R) -> Result<Option<u8>> {
+fn read_non_whitespace_byte<R: std::io::BufRead>(input: &mut R) -> std::io::Result<Option<u8>> {
     loop {
         let buffer = input.fill_buf()?;          // 获取当前缓冲区内容
         if buffer.is_empty() {
@@ -147,7 +186,18 @@ fn read_identifier<R: std::io::BufRead>(input: &mut R) -> Result<Option<Vec<u8>>
     // if id.last() == Some(&b' ') {
     //     id.pop();
     // }
+    while id.last() == Some(&b' ') || id.last() == Some(&b'\n') || id.last() == Some(&b'\r') {
+        id.pop();
+    }
     Ok(Some(id))
+}
+
+#[repr(u8)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+enum Cmd {
+    Add, Sub, Mul, Div, Mod,
+    Movc, Mov, Retc, Retv,
+    Newv, Newp, Newvp, Nop
 }
 
 fn compile_assembly_cmd<R: std::io::BufRead, W: std::io::Write>(input: &mut R, output: &mut W)
@@ -155,37 +205,54 @@ fn compile_assembly_cmd<R: std::io::BufRead, W: std::io::Write>(input: &mut R, o
     match read_identifier(input)? {
         None => Err(exceptions::Error::EOFError("Unexpected EOF when reading identifier".into())),
         Some(id) => {
-            if id == b"add " {
+            if id == b"add" {
+                (output).write_all(&[Cmd::Add as u8])?;
                 let dest = hex_to_u32(input)?.to_le_bytes().to_vec();
                 let src1 = hex_to_u32(input)?.to_le_bytes().to_vec();
                 let src2 = hex_to_u32(input)?.to_le_bytes().to_vec();
-                output.write(dest.as_slice())?;
-                output.write(src1.as_slice())?;
-                output.write(src2.as_slice())?;
+                output.write_all(dest.as_slice())?;
+                output.write_all(src1.as_slice())?;
+                output.write_all(src2.as_slice())?;
                 Ok(())
-            } else if id == b"movc " {
+            } else if id == b"movc" {
+                (output).write_all(&[Cmd::Movc as u8])?;
                 let dest = hex_to_u32(input)?.to_le_bytes().to_vec();
                 let src_val = hex_to_u32(input)?.to_le_bytes().to_vec();
-                output.write(dest.as_slice())?;
-                output.write(src_val.as_slice())?;
+                output.write_all(dest.as_slice())?;
+                output.write_all(src_val.as_slice())?;
                 Ok(())
-            } else if id == b"mov " {
-                let dest = hex_to_u32(input)?.to_le_bytes().to_vec();
-                let src_var = hex_to_u32(input)?.to_le_bytes().to_vec();
-                output.write(dest.as_slice())?;
-                output.write(src_var.as_slice())?;
+            } else if id == b"mov" {
+                (output).write_all(&[Cmd::Mov as u8])?;
+                let dest = hex_to_u32(input)?.to_le_bytes();
+                let src_var = hex_to_u32(input)?.to_le_bytes();
+                output.write_all(dest.as_slice())?;
+                output.write_all(src_var.as_slice())?;
                 Ok(())
-            } else if id == b"retc " {
-                let ret_val = hex_to_u32(input)?.to_le_bytes().to_vec();
-                output.write(ret_val.as_slice())?;
+            } else if id == b"retc" {
+                (output).write_all(&[Cmd::Retc as u8])?;
+                let ret_val = hex_to_u32(input)?.to_le_bytes();
+                output.write_all(ret_val.as_slice())?;
                 Ok(())
-            } else if id == b"retv " {
-                let ret_var = hex_to_u32(input)?.to_le_bytes().to_vec();
-                output.write(ret_var.as_slice())?;
+            } else if id == b"retv" {
+                (output).write_all(&[Cmd::Retv as u8])?;
+                let ret_var = hex_to_u32(input)?.to_le_bytes();
+                output.write_all(ret_var.as_slice())?;
                 Ok(())
-            }/* else if id == b"new " {
+            } else if id == b"newv" {
+                (output).write_all(&[Cmd::Newv as u8])?;
+                let dest = hex_to_u32(input)?.to_le_bytes();
 
-            }*/ else {
+                output.write_all(dest.as_slice())?;
+                // Ok(())
+            } else if id == b"newp" {
+                (output).write_all(&[Cmd::Newp as u8])?;
+                let dest = hex_to_u32(input)?.to_le_bytes();
+            }
+            // TODO: newvp
+            else if id == b"nop" {
+                output.write_all(&[Cmd::Nop as u8])?;
+                Ok(())
+            } else {
                 Err(exceptions::Error::InvalidOperation(
                     id.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" ")
                 ))
@@ -197,6 +264,12 @@ fn compile_assembly_cmd<R: std::io::BufRead, W: std::io::Write>(input: &mut R, o
 pub fn compile_assembly<R: std::io::BufRead, W: std::io::Write>(input: &mut R, output: &mut W) -> Result<(), exceptions::Error> {
     loop {
         match skip_whitespace_and_comments(input) {
+            Err(exceptions::Error::EOFError(_)) => {
+                return match output.flush() {
+                    Ok(()) => Ok(()),
+                    Err(e) => Err(exceptions::Error::IOError(e.to_string())),
+                };
+            }
             Err(e) => return Err(e),
             Ok(()) => {}
         }

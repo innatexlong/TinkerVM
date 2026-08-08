@@ -1,35 +1,47 @@
 use std::collections::HashMap;
 
 pub struct MemoryPool {
-
+    memory: Vec<u8>
+}
+impl MemoryPool {
+    pub fn new() -> MemoryPool {
+        Self { memory: vec![] }
+    }
+    pub fn alloc(&mut self, pos: Pos, size: Size) -> () {}
+    pub fn free(&mut self, pos: Pos, size: Size) {}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VarType {
+    // TODO: Implement these types
     // Float,
     // Double,
     // U8, U16,
-    U32, //U64,
-    VarPtr
+    U32(u32), //U64,
+    U32Ptr(Pos),
+    VarPtr(VarId)
+}
+impl std::fmt::Display for VarType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            VarType::U32(u) => write!(f, "U32(val={})", u),
+            VarType::U32Ptr(p) => write!(f, "U32Ptr(id={})", p),
+            VarType::VarPtr(p) => write!(f, "VarPtr(id={})", p),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Var {
-    ptr: u32,
-    size: u32,
-    var_type: VarType
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct TempVar {
-    value: Vec<u8>,
-    var_type: VarType
+    pub var_type: VarType
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VarId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pos(pub u32);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Size(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FuncPtr(pub u32);
 
@@ -39,6 +51,11 @@ impl std::fmt::Display for VarId {
     }
 }
 impl std::fmt::Display for Pos {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl std::fmt::Display for Size {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -68,35 +85,35 @@ impl SymbolTable {
 }
 
 pub struct Env {
-    memory_pool: MemoryPool,
-    vars: HashMap<VarId, Var>,
+    pub memory_pool: &'static MemoryPool,
+    pub vars: HashMap<VarId, Var>,
     // funcs: HashMap<String, FuncPtr>, // TODO
     // parent: Env  // TODO
 }
 
 impl Env {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            memory_pool: MemoryPool {},
+            memory_pool: &MemoryPool {},
             vars: Default::default(),
         }
     }
     #[inline]
-    fn get_var(&self, key: VarId) -> Result<&Var, crate::exceptions::Error> {
+    pub fn get_var(&self, key: VarId) -> Result<&Var, crate::exceptions::Error> {
         match self.vars.get(&key) {
             None => Err(crate::exceptions::Error::SegFault(format!("var {} not found", key))),
             Some(T) => Ok(T)
         }
     }
     #[inline]
-    fn get_var_mut(&mut self, key: VarId) -> Result<&mut Var, crate::exceptions::Error> {
+    pub fn get_var_mut(&mut self, key: VarId) -> Result<&mut Var, crate::exceptions::Error> {
         match self.vars.get_mut(&key) {
             None => Err(crate::exceptions::Error::SegFault(format!("var {} not found", key))),
             Some(T) => Ok(T)
         }
     }
     #[inline]
-    fn set_var(&mut self, key: VarId, var: Var) -> Option<Var> {
+    pub fn set_var(&mut self, key: VarId, var: Var) -> Option<Var> {
         self.vars.insert(key, var)
     }
 }
