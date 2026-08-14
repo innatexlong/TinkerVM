@@ -1,32 +1,38 @@
-pub mod parser;
 pub mod exceptions;
+pub mod memory;
+pub mod value;
 pub mod env;
+pub mod parser;
 
-fn repl() -> () {}  // TODO
+pub fn repl() -> () {}  // TODO
 
 // fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
+    let filename: String;
     if args.len() < 2 {
-        repl()
+        // repl();
+        // return Ok(())
+        filename = "example.tas".to_string();
+    } else {
+        filename = args[1].clone();
     }
-    let filename = &args[1];
-    let file = match std::fs::File::open(filename) {
+    let file = match std::fs::File::open(&filename) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::InvalidFilename => {
-            println!("Filename `{}` is invalid", filename);
+            println!("Filename `{}` is invalid", &filename);
             std::process::exit(1);
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            println!("Cannot find `{}`", filename);
+            println!("Cannot find `{}`", &filename);
             std::process::exit(1);
         },
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            println!("Permission denied when opening `{}`", filename);
+            println!("Permission denied when opening `{}`", &filename);
             std::process::exit(1);
         },
         Err(e) => {
-            println!("Cannot open the file `{}`: {}", filename, e.to_string());
+            println!("Cannot open the file `{}`: {}", &filename, e.to_string());
             std::process::exit(1);
         }
     };
@@ -34,9 +40,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut compiled_bin: Vec<u8> = Vec::new();
     {
         let mut writer = std::io::BufWriter::new(&mut compiled_bin);
-        parser::compile_assembly(&mut reader, &mut writer)?;
+        parser::asm::compile_assembly(&mut reader, &mut writer)?;
     }
-    Ok(parser::run(&mut std::io::Cursor::new(&mut compiled_bin), &mut env::Env::new())?)
+    let memory_pool = memory::MemoryPool::new(1024);
+    println!("Return code: {}", parser::exec::run(
+        &mut std::io::Cursor::new(&mut compiled_bin), &mut env::Env::new(
+            std::sync::Arc::new(std::sync::RwLock::new(memory_pool)),
+            None
+        ))?
+    );
+    Ok(())
     //
     // let global_env = env::Env::new();
     //

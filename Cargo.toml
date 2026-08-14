@@ -1,16 +1,17 @@
 [workspace]
 [package]
 name = "customVMRust"
-version = "0.6.0-alpha.4"
+version = "0.6.0-alpha.5"
 edition = "2024"
 
 [profile.release]
 opt-level = 3
-lto = false
+lto = "thin"
 codegen-units = 1
-panic = "abort"
 strip = "symbols"
 
 [dependencies]
 clap = { version = "~4.6.6", features = ["derive"] }
-thiserror = "~2.0.19"
+thiserror = "~2.0.20"
+dashmap = "~7.0.0-rc2"
+ouroboros = "~0.18.5"
