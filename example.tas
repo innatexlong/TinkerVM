@@ -1,9 +1,20 @@
-; Quick test for v0.6.0-alpha.5
-; 1. Download vm.exe (see release page) and run it.
-; 2. In the vm.exe console, paste the entire block below.
-; 3. Press Enter.
-; You should see 4 printed, and the final Ret code: 4!
-newv u32 1
-movc 15 1
-add 1 1 1
-retv 1
+func 1
+    cp
+        u32 1F  ; 0
+        u32 5  ; 1
+        u32 CAFEBABE  ; 2
+    endcp
+    newv u32 1
+    ldc 0
+    ldc 1
+    add
+    popvar 1
+    retv 1
+endfunc
+
+func 0
+    newv u32 1
+    call 1
+    popvar 1
+    retv 1
+endfunc

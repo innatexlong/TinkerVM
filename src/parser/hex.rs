@@ -1,13 +1,23 @@
-use crate::parser::utils;
+// parser/hex.rs
 
-// 内部已做字节序转换和空白字符跳过，外部调用者无须处理
-pub(crate) fn hex_to_u32<R: std::io::Read>(input: &mut R) -> std::io::Result<u32> {
-    let mut res = 0u32;
+use std::fmt::UpperHex;
+use crate::parser::utils;
+use crate::parser::asm;
+
+/// 内部已做字节序转换和空白字符跳过，外部调用者无须处理
+pub(crate) fn hex_to_uint<R: std::io::BufRead, T>(
+    input: &mut R, max_digit_count: usize, cursor_pos: &mut asm::CursorPos
+) -> Result<T, asm::AsmError>
+    where T: Sized + std::ops::BitOr<T, Output=T> + std::ops::Shl<T, Output=T> + From<u8> + UpperHex,
+{
+    let mut res: T = T::from(0u8);
     let mut count = 0;
     let mut buf = [0u8; 1];
 
+    utils::skip_whitespace_and_comments(input, cursor_pos)?;
+
     loop {
-        match input.read_exact(&mut buf) {
+        match cursor_pos.read_exact(input, &mut buf) {
             Ok(()) => {
                 let cur = buf[0] as char;
                 if cur.is_ascii_whitespace() {
@@ -17,17 +27,36 @@ pub(crate) fn hex_to_u32<R: std::io::Read>(input: &mut R) -> std::io::Result<u32
                     continue;
                 }
                 // 将十六进制字符转换为数值
-                let digit = cur.to_digit(16).ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid hex digit")
-                })?;
-                if count >= 8 {
-                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "overflow"));
+                let digit = u8::try_from(
+                    cur.to_digit(16).ok_or_else(
+                        || {
+                            asm::AsmError::new(
+                                crate::exceptions::Error::SyntaxError(format!("Invalid hex digit '{}'", cur)),
+                                *cursor_pos,
+                            )
+                        }
+                    )?
+                ).map_err(|_| asm::AsmError::new(crate::exceptions::Error::SyntaxError(format!("Invalid hex char {cur}")), *cursor_pos))?;
+                if count >= max_digit_count {
+                    return Err(asm::AsmError::new(
+                        crate::exceptions::Error::from(
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidData, format!(
+                                    "{res:0X}'{cur} overflow, maximum digit count {max_digit_count}"
+                                )
+                            )
+                        ), *cursor_pos)
+                    )
                 }
-                res = (res << 4) | digit;
+                res = (res << T::from(4u8)) | (T::from(digit));
                 count += 1;
             }
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break, // 遇到 EOF 也停止
-            Err(e) => return Err(e),
+            Err(e) => {
+                match e.error {
+                    crate::exceptions::Error::EOFError(_) => break,
+                    _ => return Err(e)
+                }
+            }
         }
     }
 
@@ -40,6 +69,24 @@ pub(crate) fn hex_to_u32<R: std::io::Read>(input: &mut R) -> std::io::Result<u32
     Ok(res)
 }
 
+#[inline]
+pub(crate) fn hex_to_u8<R: std::io::BufRead>(input: &mut R, cursor_pos: &mut asm::CursorPos) -> Result<u8, asm::AsmError> {
+    hex_to_uint(input, size_of::<u8>() * 2, cursor_pos)
+}
+#[inline]
+pub(crate) fn hex_to_u16<R: std::io::BufRead>(input: &mut R, cursor_pos: &mut asm::CursorPos) -> Result<u16, asm::AsmError> {
+    hex_to_uint(input, size_of::<u16>() * 2, cursor_pos)
+}
+#[inline]
+pub(crate) fn hex_to_u32<R: std::io::BufRead>(input: &mut R, cursor_pos: &mut asm::CursorPos) -> Result<u32, asm::AsmError> {
+    hex_to_uint(input, size_of::<u32>() * 2, cursor_pos)
+}
+#[inline]
+pub(crate) fn hex_to_u64<R: std::io::BufRead>(input: &mut R, cursor_pos: &mut asm::CursorPos) -> Result<u64, asm::AsmError> {
+    hex_to_uint(input, size_of::<u64>() * 2, cursor_pos)
+}
+
+#[inline]
 pub(crate) fn hex_char_to_byte(c: u8) -> Result<u8, Box<dyn std::error::Error>> {
     match c {
         b'0'..=b'9' => Ok(c - b'0'),
@@ -49,6 +96,7 @@ pub(crate) fn hex_char_to_byte(c: u8) -> Result<u8, Box<dyn std::error::Error>> 
     }
 }
 
+#[deprecated]
 pub fn compile_hex<R: std::io::BufRead, W: std::io::Write>(
     input: &mut R,
     output: &mut W,
