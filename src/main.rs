@@ -37,18 +37,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let mut reader = std::io::BufReader::new(file);
-    let mut compiled_bin: Vec<u8> = Vec::new();
-    {
-        let mut writer = std::io::BufWriter::new(&mut compiled_bin);
-        parser::asm::compile_assembly(&mut reader, &mut writer)?;
-    }
-    let memory_pool = memory::MemoryPool::new(1024);
-    println!("Return code: {}", parser::exec::run(
-        &mut std::io::Cursor::new(&mut compiled_bin), &mut env::Env::new(
-            std::sync::Arc::new(std::sync::RwLock::new(memory_pool)),
-            None
-        ))?
+    let memory_pool = memory::MemoryPool::new(0, 1024);
+    let env = env::Env::new(
+        std::sync::Arc::new(std::sync::RwLock::new(memory_pool)),
+        None
     );
+    let mut cursor_pos = parser::asm::CursorPos::new();
+    parser::asm::compile_assembly(&mut reader, &env, &mut cursor_pos)?;
+    for entry in &env.funcs {
+        let (key, value) = entry.pair();
+        println!("Func {key}: {:?}", value);
+    }
+    let return_res = parser::exec::run(
+        std::sync::Arc::new(std::sync::RwLock::new(env))
+    );
+    match return_res {
+        Ok(return_val) => println!("Return code: {}", return_val),
+        Err(e) => eprintln!("[debug.error] {}", e)
+    }
     Ok(())
     //
     // let global_env = env::Env::new();
