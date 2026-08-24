@@ -16,6 +16,31 @@ pub enum Var {
     Null
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValueSlot {
+    /// 基本类型直接内联在变量槽中（如 int、float、bool）
+    Primitive(Var),
+    /// 引用类型存 TypedPtr（类似 Java 引用）
+    Reference(TypedPtr),
+}
+
+impl ValueSlot {
+    pub fn is_primitive(&self) -> bool {
+        matches!(self, ValueSlot::Primitive(_))
+    }
+
+    pub fn is_reference(&self) -> bool {
+        matches!(self, ValueSlot::Reference(_))
+    }
+
+    pub fn as_ref(&self) -> Option<&TypedPtr> {
+        match self {
+            ValueSlot::Reference(r) => Some(r),
+            _ => None,
+        }
+    }
+}
+
 macro_rules! define_value_type_tags {
     // 入口：匹配 `Variant` 或 `Variant(FieldType)`
     ($($variant:ident $( ( $($field:ty),* ) )?),* $(,)?) => {
@@ -86,13 +111,16 @@ impl ValueType {
         }
     }
 
-    /// 判断是否为某种指针（多级）
     #[must_use]
     pub fn is_ptr(&self) -> bool {
         matches!(self, ValueType::Ptr(_))
     }
 
-    /// 返回指针层级数（0 表示非指针）
+    /// 是否为引用类型（在变量槽中应存 TypedPtr）
+    pub fn is_reference_type(&self) -> bool {
+        matches!(self, ValueType::String | ValueType::Ptr(_))
+    }
+
     pub fn ptr_depth(&self) -> usize {
         let mut depth = 0;
         let mut current = self;
@@ -243,6 +271,23 @@ pub(crate) fn construct_var_from_asm<R: std::io::BufRead>(
         ValueType::U16 => { Ok(Var::U16(hex::hex_to_u16(input, cursor_pos)?)) }
         ValueType::U32 => { Ok(Var::U32(hex::hex_to_u32(input, cursor_pos)?)) }
         ValueType::U64 => { Ok(Var::U64(hex::hex_to_u64(input, cursor_pos)?)) }
-        _ => todo!()
+        ValueType::I8 | ValueType::I16 | ValueType::I32 | ValueType::I64 => {
+            todo!()
+        }
+        ValueType::F32 | ValueType::F64 => {
+            todo!()
+        }
+        ValueType::Bool => {
+            todo!()
+        }
+        ValueType::String => {
+            // TODO: 从输入读取字符串，在内存池分配，返回 Var::String(ptr)
+            todo!()
+        }
+        ValueType::Ptr(inner) => {
+            // TODO: 读取指针位置，构造 TypedPtr
+            todo!()
+        }
+        ValueType::Null => Ok(Var::Null),
     }
 }

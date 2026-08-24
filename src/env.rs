@@ -59,42 +59,105 @@ impl std::fmt::Debug for FuncInfo {
 
 pub struct Env {
     pub memory_pool: std::sync::Arc<std::sync::RwLock<crate::memory::MemoryPool>>,
-    pub vars: dashmap::DashMap<crate::value::VarId, crate::value::TypedPtr>,
+    /// 局部变量表：模拟 JVM 栈帧，索引就是 VarId.0
+    pub vars: Vec<Option<crate::value::ValueSlot>>,
     pub parent: Option<std::sync::Arc<std::sync::RwLock<Env>>>,
     pub funcs: dashmap::DashMap<FuncPtr, std::sync::Arc<FuncInfo>>,
 }
 impl Env {
-    #[inline]
     pub fn new(
-        memory_pool: std::sync::Arc<std::sync::RwLock<crate::memory::MemoryPool>>, parent: Option<std::sync::Arc<std::sync::RwLock<Env>>>
+        memory_pool: std::sync::Arc<std::sync::RwLock<crate::memory::MemoryPool>>,
+        parent: Option<std::sync::Arc<std::sync::RwLock<Env>>>,
     ) -> Self {
         Self {
             memory_pool,
-            vars: Default::default(),
+            vars: Vec::new(),
             parent,
             funcs: Default::default(),
         }
     }
 
-    #[inline]
-    pub fn as_mut_ref(&mut self) -> &mut Env {
-        self
+    /// 确保局部变量表长度足够
+    fn ensure_capacity(&mut self, index: usize) {
+        if index >= self.vars.len() {
+            self.vars.resize_with(index + 1, || None);
+        }
     }
 
-    #[inline]
-    /// 查找变量（沿作用域链向上）
-    pub fn lookup_var(&self, id: &crate::value::VarId) -> Option<crate::value::TypedPtr> {
-        if let Some(ptr) = self.vars.get(id) {
-            return Some(ptr.clone());
+    /// 查找变量槽（沿作用域链向上）
+    pub fn lookup_slot(&self, id: &crate::value::VarId) -> Option<crate::value::ValueSlot> {
+        if let Some(slot) = self.vars.get(id.0 as usize).and_then(|s| s.clone()) {
+            return Some(slot);
         }
         if let Some(parent) = &self.parent {
-            return parent.read().unwrap().lookup_var(id);
+            return parent.read().unwrap().lookup_slot(id);
         }
         None
     }
 
-    #[inline]
-    /// 通过 TypedPtr 获取值的引用（只读）
+    /// 获取变量值：基本类型直接返回，引用类型通过 TypedPtr 从堆中取
+    pub fn get_var(&self, id: &crate::value::VarId) -> Result<crate::value::Var, crate::exceptions::Error> {
+        match self.lookup_slot(id).ok_or_else(|| crate::exceptions::Error::NotFound(format!("Var {id}")))? {
+            crate::value::ValueSlot::Primitive(v) => Ok(v),
+            crate::value::ValueSlot::Reference(ptr) => self.with_var(ptr, |v| v.clone()),
+        }
+    }
+
+    /// 设置变量值：基本类型直接写入槽，引用类型通过 TypedPtr 写入堆
+    pub fn set_var_value(
+        &mut self,
+        id: crate::value::VarId,
+        value: crate::value::Var,
+    ) -> Result<(), crate::exceptions::Error> {
+        let index = id.0 as usize;
+        // 确保索引在范围内
+        if index >= self.vars.len() {
+            return Err(crate::exceptions::Error::NotFound(format!("Failed to set var {id}")));
+        }
+
+        // 取出当前槽位（不释放，后面可能还要用）
+        let slot = self.vars[index].as_ref().cloned()
+            .ok_or_else(|| crate::exceptions::Error::NotFound(format!("Failed to set var {id}")))?;
+
+        match slot {
+            crate::value::ValueSlot::Primitive(_) => {
+                // 基本类型：直接替换槽位中的值
+                self.vars[index] = Some(crate::value::ValueSlot::Primitive(value));
+                Ok(())
+            }
+            crate::value::ValueSlot::Reference(ptr) => {
+                // 引用类型：通过 TypedPtr 修改堆内存中的值
+                self.with_var_mut(ptr, |var| *var = value)
+            }
+        }
+    }
+
+    /// 设置引用类型的变量槽（仅用于 String、Ptr 等引用类型）
+    /// TODO: 支持拷贝类型
+    pub fn set_var_ref(
+        &mut self,
+        id: crate::value::VarId,
+        ptr: crate::value::TypedPtr,
+    ) -> Result<(), crate::exceptions::Error> {
+        if !ptr.ty.is_reference_type() {
+            return Err(crate::exceptions::Error::InvalidOperation(
+                "set_var_ref can only be used with reference types".into(),
+            ));
+        }
+
+        let index = id.0 as usize;
+        if index >= self.vars.len() {
+            return Err(crate::exceptions::Error::NotFound(format!(
+                "Failed to set var {id}: index out of bounds"
+            )));
+        }
+
+        // 直接写入引用类型槽位，覆盖旧值（若旧值也是引用，不会自动释放堆内存，需调用者负责）
+        self.vars[index] = Some(crate::value::ValueSlot::Reference(ptr));
+        Ok(())
+    }
+
+    /// 通过 TypedPtr 获取值的只读引用
     pub fn with_var<F, R>(&self, ptr: crate::value::TypedPtr, f: F) -> Result<R, crate::exceptions::Error>
     where
         F: FnOnce(&crate::value::Var) -> R,
@@ -105,56 +168,6 @@ impl Env {
         Ok(f(var))
     }
 
-    #[inline]
-    pub fn set_var_value(
-        &self,
-        id: crate::value::VarId,
-        value: crate::value::Var,
-    ) -> Result<(), crate::exceptions::Error> {
-        // 只在当前环境 vars 中查找
-        let ptr = self.vars.get(&id)
-            .map(|r| r.value().clone())
-            .ok_or_else(|| crate::exceptions::Error::NotFound(format!("Failed to set var {id} since the current env doesn't define {id}")))?;
-        self.with_var_mut(ptr, |var| *var = value)
-    }
-
-    #[inline]
-    pub fn set_var_pos(
-        &self,
-        id: crate::value::VarId,
-        ptr: crate::value::TypedPtr,
-    ) -> Result<(), crate::exceptions::Error> {
-        self.vars.insert(id, ptr);
-        Ok(())
-    }
-
-    #[inline]
-    pub fn get_var(&self, id: &crate::value::VarId) -> Result<crate::value::Var, crate::exceptions::Error> {
-        let ptr = self.lookup_var(id).ok_or_else(|| crate::exceptions::Error::NotFound(format!("Var {id}")))?;
-        self.with_var(ptr, |var| var.clone())
-    }
-
-    /// 删除变量但不释放内存块
-    #[inline]
-    pub fn remove_var(&self, id: crate::value::VarId) -> Result<(), crate::exceptions::Error> {
-        match self.vars.remove(&id) {
-            Some(_) => Ok(()),
-            None => Err(crate::exceptions::Error::NotFound(format!("Delete undefined var {id}"))),
-        }
-    }
-
-    /// 删除变量且释放内存块
-    #[inline]
-    pub fn drop_var(&self, id: crate::value::VarId) -> Result<(), crate::exceptions::Error> {
-        match self.vars.remove(&id) {
-            Some(var) => {
-                self.memory_pool.write().unwrap().dealloc(var.1.pos)
-            },
-            None => Err(crate::exceptions::Error::NotFound(format!("Delete undefined var and its memory {id}"))),
-        }
-    }
-
-    #[inline]
     /// 通过 TypedPtr 获取值的可变引用
     pub fn with_var_mut<F, R>(&self, ptr: crate::value::TypedPtr, f: F) -> Result<R, crate::exceptions::Error>
     where
@@ -167,9 +180,77 @@ impl Env {
         Ok(f(var))
     }
 
-    #[inline]
-    pub fn insert_var(&mut self, id: crate::value::VarId, ptr: crate::value::TypedPtr) -> Option<crate::value::TypedPtr> {
-        self.vars.insert(id, ptr)
+    pub fn remove_var(&mut self, id: crate::value::VarId) -> Result<(), crate::exceptions::Error> {
+        let index = id.0 as usize;
+        if index >= self.vars.len() {
+            return Err(crate::exceptions::Error::NotFound(format!(
+                "Delete undefined var {id}"
+            )));
+        }
+
+        match self.vars[index].take() {
+            Some(_) => Ok(()),
+            None => Err(crate::exceptions::Error::NotFound(format!(
+                "Delete undefined var {id}"
+            ))),
+        }
+    }
+
+    /// 删除变量槽并释放引用类型指向的堆内存
+    pub fn drop_var(&mut self, id: crate::value::VarId) -> Result<(), crate::exceptions::Error> {
+        let index = id.0 as usize;
+        if index >= self.vars.len() {
+            return Err(crate::exceptions::Error::NotFound(format!(
+                "Delete undefined var and its memory {id}"
+            )));
+        }
+
+        let slot = self.vars[index].take().ok_or_else(|| {
+            crate::exceptions::Error::NotFound(format!(
+                "Delete undefined var and its memory {id}"
+            ))
+        })?;
+
+        // 只有引用类型才需要释放堆内存
+        if let crate::value::ValueSlot::Reference(ptr) = slot {
+            let mut pool = self.memory_pool.write().map_err(|e| {
+                crate::exceptions::Error::InvalidOperation(format!("Lock poisoned: {}", e))
+            })?;
+            pool.dealloc(ptr.pos)?; // 假设 dealloc 返回 Result<(), Error>
+        }
+
+        Ok(())
+    }
+
+    /// 插入一个变量槽（基本类型或引用类型），返回被替换的旧槽（如果有）
+    pub fn insert_slot(
+        &mut self,
+        id: crate::value::VarId,
+        slot: crate::value::ValueSlot,
+    ) -> Option<crate::value::ValueSlot> {
+        let index = id.0 as usize;
+        self.ensure_capacity(index);
+        let old = self.vars[index].take();
+        self.vars[index] = Some(slot);
+        old
+    }
+
+    /// 插入一个引用类型变量（如 String、Ptr），返回被替换的旧槽
+    pub fn insert_var(
+        &mut self,
+        id: crate::value::VarId,
+        ptr: crate::value::TypedPtr,
+    ) -> Option<crate::value::ValueSlot> {
+        self.insert_slot(id, crate::value::ValueSlot::Reference(ptr))
+    }
+
+    /// 插入一个基本类型变量，返回被替换的旧槽
+    pub fn insert_primitive(
+        &mut self,
+        id: crate::value::VarId,
+        value: crate::value::Var,
+    ) -> Option<crate::value::ValueSlot> {
+        self.insert_slot(id, crate::value::ValueSlot::Primitive(value))
     }
 
     pub fn get_func(

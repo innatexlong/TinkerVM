@@ -3,11 +3,14 @@
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Cmd {
     Add, Sub, Mul, Div, Mod,  // 0-4
-    Retc, Retv, Movc, Mov,  // 5-8
-    Newv, Newp, Delv, Delp, Nop,  // 9-13
-    Call,  // 14
-    PushVar, PopVar,  // 15-16
-    Ldc,  // 17
+    Retc, Retv, PopRet,  // 5-7
+    // Label, Jmp, IfJmp, IfnJmp
+    // Cmp, JG, JE, JL, JNE, JGE, JLE
+    Movc, Mov,  // 8-9
+    Newv, Newp, Delv, Delp, Nop,  // 10-14
+    Call,  // 15
+    PushVar, PopVar, Dup,  // 16-18
+    Ldc,  // 19
 }
 
 pub(crate) mod cmd_u8 {
@@ -21,6 +24,7 @@ pub(crate) mod cmd_u8 {
     // control flow
     pub const RETC: u8 = Cmd::Retc as u8;
     pub const RETV: u8 = Cmd::Retv as u8;
+    pub const POPRET: u8 = Cmd::PopRet as u8;
     // memory
     pub const MOVC: u8 = Cmd::Movc as u8;
     pub const MOV: u8 = Cmd::Mov as u8;
@@ -35,5 +39,8 @@ pub(crate) mod cmd_u8 {
     // operand stack
     pub const PUSHVAR: u8 = Cmd::PushVar as u8;
     pub const POPVAR: u8 = Cmd::PopVar as u8;
+    pub const DUP: u8 = Cmd::Dup as u8;
     pub const LDC: u8 = Cmd::Ldc as u8;
+    // pub const LABEL: u8 = Cmd::Label as u8;
+    // pub const JMP: u8 = Cmd::Jmp as u8;
 }

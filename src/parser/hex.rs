@@ -32,20 +32,16 @@ pub(crate) fn hex_to_uint<R: std::io::BufRead, T>(
                         || {
                             asm::AsmError::new(
                                 crate::exceptions::Error::SyntaxError(format!("Invalid hex digit '{}'", cur)),
-                                *cursor_pos,
+                                cursor_pos,
                             )
                         }
                     )?
-                ).map_err(|_| asm::AsmError::new(crate::exceptions::Error::SyntaxError(format!("Invalid hex char {cur}")), *cursor_pos))?;
+                ).map_err(|_| asm::AsmError::new(crate::exceptions::Error::SyntaxError(format!("Invalid hex char {cur}")), cursor_pos))?;
                 if count >= max_digit_count {
                     return Err(asm::AsmError::new(
-                        crate::exceptions::Error::from(
-                            std::io::Error::new(
-                                std::io::ErrorKind::InvalidData, format!(
-                                    "{res:0X}'{cur} overflow, maximum digit count {max_digit_count}"
-                                )
-                            )
-                        ), *cursor_pos)
+                        crate::exceptions::Error::Overflow(
+                            format!("{res:0X}'{cur} overflow, maximum digit count {max_digit_count}")
+                        ), cursor_pos)
                     )
                 }
                 res = (res << T::from(4u8)) | (T::from(digit));

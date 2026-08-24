@@ -29,11 +29,11 @@ impl CursorPos {
     }
     #[inline]
     pub fn read<R: std::io::BufRead>(&mut self, input: &mut R, buf: &mut [u8]) -> Result<usize, ExecError> {
-        ok_or_err(input.read(buf), *self)
+        ok_or_err(input.read(buf), self)
     }
     #[inline]
     pub fn read_exact<R: std::io::BufRead>(&mut self, input: &mut R, buf: &mut [u8]) -> Result<(), ExecError> {
-        ok_or_err(input.read_exact(buf), *self)?;
+        ok_or_err(input.read_exact(buf), self)?;
         self.pos += buf.len();
         Ok(())
     }
@@ -54,11 +54,11 @@ impl std::fmt::Display for ExecError {
     }
 }
 
-pub(crate) fn ok_or_err<ResOk, ResErr: std::error::Error>(result: Result<ResOk, ResErr>, pos: CursorPos) -> Result<ResOk, ExecError>
+pub(crate) fn ok_or_err<ResOk, ResErr: std::error::Error>(result: Result<ResOk, ResErr>, pos: &CursorPos) -> Result<ResOk, ExecError>
 where crate::exceptions::Error: From<ResErr> {
     match result {
         Ok(value) => Ok(value),
-        Err(error) => Err(ExecError::new(crate::exceptions::Error::from(error), pos)),
+        Err(error) => Err(ExecError::new(crate::exceptions::Error::from(error), *pos)),
     }
 }
 
@@ -67,7 +67,7 @@ pub fn func(
 ) -> Result<crate::value::Var, ExecError> {
     // use std::io::Read;
     let mut cursor = CursorPos::new();
-    let func_info = ok_or_err(parent_env.read().unwrap().get_func(func_id), cursor)?;
+    let func_info = ok_or_err(parent_env.read().unwrap().get_func(func_id), &cursor)?;
     let input = &mut std::io::BufReader::new(func_info.code.as_slice());
     let child_env_arc = std::sync::Arc::new(
         std::sync::RwLock::new(crate::env::Env::new(parent_env.read().unwrap().memory_pool.clone(), Some(parent_env.clone())))
@@ -80,14 +80,24 @@ pub fn func(
             Ok(()) => {
                 match buffer {
                     // TODO: Automatically push bytes to cursor
-                    [cmd_u8::ADD] => {
-                        exec_cmd::add(&mut frame.operand_stack, &mut cursor)?;
+                    [cmd_u8::ADD] => { exec_cmd::add(&mut frame.operand_stack, &mut cursor)?; }
+                    [cmd_u8::MUL] => { exec_cmd::mul(&mut frame.operand_stack, &mut cursor)?; }
+                    [cmd_u8::RETC] => {
+                        let val_id = utils::read_bin_to_u8(input, "val_id of retc", &mut cursor)?;
+                        return match func_info.constants.get(val_id as usize) {
+                            Some(value) => Ok(value.clone()),
+                            None => Err(ExecError::new(crate::exceptions::Error::OutOfIndex(format!("Constant pool, {val_id}")), cursor)),
+                        }
                     }
-                    [cmd_u8::SUB] => {
+                    [cmd_u8::POPRET] => {
+                        return match frame.operand_stack.pop() {
+                            Some(val) => Ok(val),
+                            None => Err(ExecError::new(crate::exceptions::Error::OutOfIndex(String::from("popret from empty constant pool")), cursor)),
+                        }
                     }
                     [cmd_u8::RETV] => {
                         let var_id = crate::value::VarId(utils::read_bin_to_u32(input, "var_id of retv", &mut cursor)?);
-                        return ok_or_err(child_env_arc.read().unwrap().get_var(&var_id), cursor);
+                        return ok_or_err(child_env_arc.read().unwrap().get_var(&var_id), &cursor);
                     }
                     [cmd_u8::MOVC] => {
                         let mut child_env = child_env_arc.write().unwrap();
@@ -103,7 +113,7 @@ pub fn func(
                     }
                     [cmd_u8::DELV] => {
                         let mut child_env = child_env_arc.write().unwrap();
-                        exec_cmd::delv(input, child_env.as_mut_ref(), &mut cursor)?;
+                        exec_cmd::delv(input, &mut child_env, &mut cursor)?;
                     }
                     [cmd_u8::NOP] => { cursor.pos += size_of_val(&cmd_u8::NOP); continue },
                     [cmd_u8::CALL] => {
@@ -116,6 +126,7 @@ pub fn func(
                     [cmd_u8::POPVAR] => {
                         exec_cmd::popvar(input, &mut child_env_arc.write().unwrap(), &mut frame.operand_stack, &mut cursor)?;
                     }
+                    [cmd_u8::DUP] => exec_cmd::dup(&mut frame.operand_stack, &mut cursor)?,
                     [cmd_u8::LDC] => {
                         exec_cmd::ldc(input, &func_info.constants, &mut frame.operand_stack, &mut cursor)?;
                     }

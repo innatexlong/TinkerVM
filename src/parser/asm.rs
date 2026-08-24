@@ -41,6 +41,8 @@ pub struct CursorPos {
     pub column: u32,
     buffer: [u8; 4],     // UTF-8 最大 4 字节
     buf_len: u32,      // 当前缓冲区有效长度
+    pub func: Option<crate::env::FuncPtr>,
+    is_static: bool,
 }
 
 impl std::fmt::Display for CursorPos {
@@ -56,34 +58,42 @@ impl CursorPos {
             column: 1,
             buffer: [0u8; 4],
             buf_len: 0,
+            func: None,
+            is_static: false,
         }
     }
-    pub fn with_pos(line: u32, column: u32) -> Self {
+    pub fn with_pos(line: u32, column: u32, func: Option<crate::env::FuncPtr>) -> Self {
         Self {
             line,
             column,
             buffer: [0u8; 4],
             buf_len: 0,
+            func,
+            is_static: false,
         }
     }
 
     pub fn read_exact<R: std::io::BufRead>(&mut self, input: &mut R, buf: &mut [u8]) -> Result<(), AsmError> {
         ok_or_err(input.read_exact(buf), self)?;
+        if self.is_static { return Ok(()) }
         self.push_bytes(buf);
         Ok(())
     }
     pub fn read_until<R: std::io::BufRead>(&mut self, input: &mut R, byte: u8, buf: &mut Vec<u8>) -> Result<usize, AsmError> {
         let len = ok_or_err(input.read_until(byte, buf), self)?;
+        if self.is_static { return Ok(len) }
         self.push_bytes(buf);
         Ok(len)
     }
 
     pub fn push_bytes(&mut self, bytes: &[u8]) -> () {
+        if self.is_static { return }
         for &b in bytes {
             self.push_u8(b);
         }
     }
     pub fn push_u8(&mut self, byte: u8) -> () {
+        if self.is_static { return }
         // 快速路径：缓冲区为空且字节是 ASCII（单字节）
         if self.buf_len == 0 && byte < 0x80 {
             match byte {
@@ -147,6 +157,38 @@ impl CursorPos {
         self.column = column;
         self.buf_len = 0;
     }
+
+    pub fn set_static(&mut self, is_static: bool) -> Result<(), AsmError> {
+        if self.is_static == is_static {
+            return Err(
+                AsmError::new(
+                    crate::exceptions::Error::Duplicated(
+                        "".to_string()
+                    ),
+                    self
+                )
+            )
+        }
+        self.is_static = is_static;
+        Ok(())
+    }
+}
+
+pub struct StaticCursorPos<'a> {
+    pub cursor_pos: &'a mut CursorPos,
+}
+impl<'a> StaticCursorPos<'a> {
+    pub fn new(cursor_pos: &'a mut CursorPos) -> Self {
+        assert!(!cursor_pos.is_static, "Already in static mode");
+        cursor_pos.is_static = true;
+        Self { cursor_pos }
+    }
+}
+impl Drop for StaticCursorPos<'_> {
+    fn drop(&mut self) {
+        assert!(self.cursor_pos.is_static, "Already disabled static mode");
+        self.cursor_pos.is_static = false;
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -155,10 +197,10 @@ pub struct AsmError {
     pub pos: CursorPos,
 }
 impl AsmError {
-    pub fn new(error: crate::exceptions::Error, pos: CursorPos) -> Self {
+    pub fn new(error: crate::exceptions::Error, pos: &CursorPos) -> Self {
         Self {
             error,
-            pos
+            pos: *pos
         }
     }
 }
@@ -188,13 +230,12 @@ pub fn compile_assembly_cmd<R: std::io::BufRead, W: std::io::Write>(
     use crate::parser::cmd::{Cmd, cmd_u8};
     use crate::parser::hex::{hex_to_u8, hex_to_u32};
     match id {
-        b"func" | b"endfunc" => {
-            Err(AsmError{ error: crate::exceptions::Error::Duplicated("Nested function definition".to_string()), pos: *cursor_pos })
-        }
-        b"add" => {
-            ok_or_err(output.write_all(&[cmd_u8::ADD]), cursor_pos)?;
-            Ok(())
-        }
+        b"func" | b"endfunc" => Err(AsmError::new(crate::exceptions::Error::Duplicated("Nested function definition".to_string()), cursor_pos)),
+        b"add" => ok_or_err(output.write_all(&[cmd_u8::ADD]), cursor_pos),
+        b"sub" => ok_or_err(output.write_all(&[cmd_u8::SUB]), cursor_pos),
+        b"mul" => ok_or_err(output.write_all(&[cmd_u8::MUL]), cursor_pos),
+        b"div" => ok_or_err(output.write_all(&[cmd_u8::DIV]), cursor_pos),
+        b"mod" => ok_or_err(output.write_all(&[cmd_u8::MOD]), cursor_pos),
         b"movc" => {
             let src_val = hex_to_u32(input, cursor_pos)?.to_le_bytes().to_vec();
             let dest_var = hex_to_u32(input, cursor_pos)?.to_le_bytes().to_vec();
@@ -225,6 +266,7 @@ pub fn compile_assembly_cmd<R: std::io::BufRead, W: std::io::Write>(
             ok_or_err(output.write_all(ret_var.as_slice()), cursor_pos)?;
             Ok(())
         }
+        b"popret" => ok_or_err(output.write_all(&[cmd_u8::POPRET]), cursor_pos),
         b"newv" => {
             // TODO: Implement custom var types for `newv`
             let type_ = read_identifier(input, cursor_pos)?;
@@ -233,7 +275,7 @@ pub fn compile_assembly_cmd<R: std::io::BufRead, W: std::io::Write>(
                 None => return Err(
                     AsmError::new(
                         crate::exceptions::Error::EOFError("Unexpected EOF when reading type identifier".into()),
-                        *cursor_pos
+                        cursor_pos
                     )
                 ),
             };
@@ -294,6 +336,7 @@ pub fn compile_assembly_cmd<R: std::io::BufRead, W: std::io::Write>(
             ok_or_err(output.write_all(var_id.as_slice()), cursor_pos)?;
             Ok(())
         }
+        b"dup" => ok_or_err(output.write_all(&[cmd_u8::DUP]), cursor_pos),
         b"ldc" => {
             let val_id = hex_to_u8(input, cursor_pos)?.to_le_bytes();
             ok_or_err(output.write_all(&[cmd_u8::LDC]), cursor_pos)?;
@@ -301,11 +344,36 @@ pub fn compile_assembly_cmd<R: std::io::BufRead, W: std::io::Write>(
             Ok(())
         }
         _ => {
+            let mut reader = std::io::Cursor::new(id);
+            let mut temp_pos = CursorPos::new();
+
+            let token = String::from_utf8_lossy(id);
+
+            if id.iter().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')) {
+                match crate::parser::hex::hex_to_u64(&mut reader, &mut temp_pos) {
+                    Ok(num) => return Err(AsmError::new(
+                        crate::exceptions::Error::InvalidIdentifier(
+                            format!("Integer {num} is not a valid identifier, did you add redundant arguments?")
+                        ),
+                        cursor_pos,  // 使用原始位置
+                    )),
+                    Err(err) if matches!(err.error, crate::exceptions::Error::Overflow(_)) => return Err(AsmError::new(
+                        crate::exceptions::Error::InvalidIdentifier(
+                            format!("'{}' looks like a valid integer but it overflows. Did you add redundant integer arguments?",
+                                    String::from_utf8_lossy(id))
+                        ),
+                        cursor_pos,
+                    )),
+                    Err(err) => return Err(err),
+                };
+            }
+
             Err(
                 AsmError::new(
                     crate::exceptions::Error::InvalidIdentifier(
                         String::from_utf8_lossy(id).to_string()
-                    ), *cursor_pos
+                    ),
+                cursor_pos
                 )
             )
         }
@@ -324,7 +392,7 @@ pub fn compile_assembly<R: std::io::BufRead>(input: &mut R, env: &crate::env::En
                     crate::exceptions::Error::EOFError(_) => {
                         match cur_func_opt {
                             Some((_func_ptr, ref mut _writer)) => {
-                                Err(AsmError::new(crate::exceptions::Error::SyntaxError("Expected 'endfunc', got <EOF>".to_string()), *cursor_pos))
+                                Err(AsmError::new(crate::exceptions::Error::SyntaxError("Expected 'endfunc', got <EOF>".to_string()), cursor_pos))
                             }
                             None => Ok(()),
                         }
@@ -339,7 +407,7 @@ pub fn compile_assembly<R: std::io::BufRead>(input: &mut R, env: &crate::env::En
                 return if cur_func_opt.is_none() {
                     Ok(())
                 } else {
-                    Err(AsmError::new(crate::exceptions::Error::EOFError("Unexpected EOF when reading cmd identifier".to_string()), *cursor_pos))
+                    Err(AsmError::new(crate::exceptions::Error::EOFError("Unexpected EOF when reading cmd identifier".to_string()), cursor_pos))
                 }
             },
             Some(id) => {
@@ -349,7 +417,7 @@ pub fn compile_assembly<R: std::io::BufRead>(input: &mut R, env: &crate::env::En
                             AsmError::new(
                                 crate::exceptions::Error::Duplicated(
                                     format!("Nested functions are not allowed. Current defining function is {}", func_ptr)
-                                ), *cursor_pos
+                                ), cursor_pos
                             )
                         )
                     } else {
@@ -359,12 +427,12 @@ pub fn compile_assembly<R: std::io::BufRead>(input: &mut R, env: &crate::env::En
                 } else if id == b"endfunc" {
                     if let Some((cur_func_id, cur_func_bin)) = cur_func_opt.take() {
                         let bytes = cur_func_bin.into_inner().map_err(
-                            |e| AsmError::new(crate::exceptions::Error::UnrecognizedError(e.to_string(), 1), *cursor_pos)
+                            |e| AsmError::new(crate::exceptions::Error::UnrecognizedError(e.to_string(), 1), cursor_pos)
                         )?;
                         ok_or_err(env.register_func(cur_func_id, bytes, constants.into()), cursor_pos)?;
                         constants = Vec::with_capacity(10);
                     } else {
-                        return Err(AsmError::new(crate::exceptions::Error::SyntaxError("Unexpected endfunc".to_string()), *cursor_pos))
+                        return Err(AsmError::new(crate::exceptions::Error::SyntaxError("Unexpected endfunc".to_string()), cursor_pos))
                     }
                     continue;
                 } else if let Some((_, ref mut output)) = cur_func_opt {
@@ -372,7 +440,7 @@ pub fn compile_assembly<R: std::io::BufRead>(input: &mut R, env: &crate::env::En
                         loop {
                             skip_whitespace_and_comments(input, cursor_pos)?;
                             match read_identifier(input, cursor_pos)? {
-                                None => return Err(AsmError::new(crate::exceptions::Error::EOFError("Unexpected end of constant pool".to_string()), *cursor_pos)),
+                                None => return Err(AsmError::new(crate::exceptions::Error::EOFError("Unexpected end of constant pool".to_string()), cursor_pos)),
                                 Some(id) => {
                                     if id == b"endcp" {
                                         break;
@@ -386,12 +454,12 @@ pub fn compile_assembly<R: std::io::BufRead>(input: &mut R, env: &crate::env::En
                             }
                         }
                     } else if id == b"endcp" {
-                        return Err(AsmError::new(crate::exceptions::Error::SyntaxError("endcp is invalid outside constant pools".to_string()), *cursor_pos));
+                        return Err(AsmError::new(crate::exceptions::Error::SyntaxError("endcp is invalid outside constant pools".to_string()), cursor_pos));
                     } else { compile_assembly_cmd(id.as_slice(), input, output, cursor_pos)?; }
                 } else {
                     return Err(AsmError::new(crate::exceptions::Error::SyntaxError(
                         format!("Statements {} must be in a function", String::from_utf8_lossy(id.as_slice()))
-                    ), *cursor_pos))
+                    ), cursor_pos))
                 }
             }
         }

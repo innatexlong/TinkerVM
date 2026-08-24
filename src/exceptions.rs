@@ -5,10 +5,11 @@ pub enum ErrorCode {
     WildPointer = 0xE000_0005,
     Duplicated = 0xF000_0005,
     InvalidOperation = 0x0000_000A,
-    SizeMismatch,
+    InvalidSize,
     InvalidType,
     OutOfIndex,
     OutOfMemory,
+    Overflow,
     IOError,
     EOFError,
     InvalidIdentifier,
@@ -28,14 +29,16 @@ pub enum Error {
     Duplicated(String),
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
-    #[error("Size mismatch: {0}")]
-    SizeMismatch(String),
+    #[error("Invalid size: {0}")]
+    InvalidSize(String),
     #[error("Invalid type: {0}")]
     InvalidType(String),
     #[error("Out of index: {0}")]
     OutOfIndex(String),
     #[error("Out of memory: {0}")]
     OutOfMemory(String),
+    #[error("Overflow: {0}")]
+    Overflow(String),
     #[error("IOError: {0}")]
     IOError(String),
     #[error("EOFError: {0}")]
@@ -56,10 +59,11 @@ impl Error {
             Self::WildPointer(_) => ErrorCode::WildPointer as u32,
             Self::Duplicated(_) => ErrorCode::Duplicated as u32,
             Self::InvalidOperation(_) => ErrorCode::InvalidOperation as u32,
-            Self::SizeMismatch(_) => ErrorCode::SizeMismatch as u32,
+            Self::InvalidSize(_) => ErrorCode::InvalidSize as u32,
             Self::InvalidType(_) => ErrorCode::InvalidType as u32,
             Self::OutOfIndex(_) => ErrorCode::OutOfIndex as u32,
             Self::OutOfMemory(_) => ErrorCode::OutOfMemory as u32,
+            Self::Overflow(_) => ErrorCode::Overflow as u32,
             Self::IOError(_) => ErrorCode::IOError as u32,
             Self::EOFError(_) => ErrorCode::EOFError as u32,
             Self::InvalidIdentifier(_) => ErrorCode::InvalidIdentifier as u32,
