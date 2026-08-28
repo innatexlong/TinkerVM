@@ -9,7 +9,7 @@ opt-level = 3
 lto = "thin"
 codegen-units = 16
 strip = "symbols"
-incremental = true
+incremental = false
 
 [profile.dev]
 opt-level = 0
