@@ -11,8 +11,9 @@ pub enum Var {
     F32(f32),
     F64(f64),
     Bool(bool),
-    String(String),
+    Str(String),
     Pointer(TypedPtr),  // 这样指针值本身也是有类型的（即指向的类型）
+    VoidPtr(crate::env::Pos),
     Null
 }
 
@@ -74,7 +75,8 @@ define_value_type_tags!(
     F32,
     F64,
     Bool,
-    String,
+    Str,
+    VoidPtr,
     Ptr,
     Null,
 );
@@ -94,8 +96,8 @@ pub enum ValueType {
     F32,
     F64,
     Bool,
-    String,
-
+    Str,
+    VoidPtr,
     /// 指针类型，指向某种类型（可嵌套）
     Ptr(std::sync::Arc<ValueType>),
     // 可以再加 Null 类型
@@ -118,7 +120,7 @@ impl ValueType {
 
     /// 是否为引用类型（在变量槽中应存 TypedPtr）
     pub fn is_reference_type(&self) -> bool {
-        matches!(self, ValueType::String | ValueType::Ptr(_))
+        matches!(self, ValueType::Str | ValueType::Ptr(_))
     }
 
     pub fn ptr_depth(&self) -> usize {
@@ -155,7 +157,7 @@ pub type VarTypeCodeType = u8;
 //         F32,
 //         F64,
 //         Bool,
-//         String,
+//         Str,
 //         Pointer,
 //     }
 //     pub const U8: VarTypeCodeType = VarTypeCodeType as u8;
@@ -165,7 +167,7 @@ pub type VarTypeCodeType = u8;
 //     pub const F32: VarTypeCodeType = 4;
 //     pub const F64: VarTypeCodeType = 5;
 //     pub const BOOL: VarTypeCodeType = 6;
-//     pub const STRING: VarTypeCodeType = 7;
+//     pub const STR: VarTypeCodeType = 7;
 //     pub const POINTER: VarTypeCodeType = 8;
 // }
 
@@ -182,7 +184,9 @@ pub fn var_type_asm_to_code(var_type: &[u8]) -> Result<VarTypeCodeType, crate::e
         b"f32" => Ok(var_type_code::F32),
         b"f64" => Ok(var_type_code::F64),
         b"bool" => Ok(var_type_code::Bool),
-        b"str" => Ok(var_type_code::String),
+        b"str" => Ok(var_type_code::Str),
+        b"voidptr" => Ok(var_type_code::VoidPtr),
+        b"null" => Ok(var_type_code::Null),
         b"ptr" => Err(crate::exceptions::Error::InvalidType("ptr is not supported yet".to_string())),
         _ => Err(crate::exceptions::Error::InvalidType(String::from_utf8_lossy(var_type).into_owned()))
     }
@@ -201,8 +205,10 @@ pub fn var_type_asm_to_type(var_type: &[u8]) -> Result<ValueType, crate::excepti
         b"f32" => Ok(ValueType::F32),
         b"f64" => Ok(ValueType::F64),
         b"bool" => Ok(ValueType::Bool),
-        b"str" => Ok(ValueType::String),
-        b"ptr" => Err(crate::exceptions::Error::InvalidType("ptr is not supported yet".to_string())),
+        b"str" => Ok(ValueType::Str),
+        b"voidptr" => Ok(ValueType::VoidPtr),
+        b"null" => Ok(ValueType::Null),
+        b"ptr" => Err(crate::exceptions::Error::InvalidType("ptr is not supported by value::var_type_asm_to_type, use parser::asm::get_type_from_asm instead".to_string())),
         _ => Err(crate::exceptions::Error::InvalidType(String::from_utf8_lossy(var_type).into_owned()))
     }
 }
@@ -229,7 +235,7 @@ pub fn var_type_asm_to_type(var_type: &[u8]) -> Result<ValueType, crate::excepti
 // }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct VarId(pub u32);
+pub struct VarId(pub u16);
 
 impl std::fmt::Display for VarId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -254,11 +260,12 @@ pub(crate) fn get_type_from_bin<R: std::io::BufRead>(input: &mut R, cursor: &mut
         var_type_code::F32 => Ok(ValueType::F32),
         var_type_code::F64 => Ok(ValueType::F64),
         var_type_code::Bool => Ok(ValueType::Bool),
-        var_type_code::String => Ok(ValueType::String),
+        var_type_code::Str => Ok(ValueType::Str),
+        var_type_code::Null => Ok(ValueType::Null),
         var_type_code::Ptr => {
             Ok(ValueType::Ptr(std::sync::Arc::from(get_type_from_bin(input, cursor)?)))
         }
-        var_type_code::Ptr..=u8::MAX => todo!(),
+        _ => todo!(),
     }
 }
 
@@ -280,9 +287,12 @@ pub(crate) fn construct_var_from_asm<R: std::io::BufRead>(
         ValueType::Bool => {
             todo!()
         }
-        ValueType::String => {
+        ValueType::Str => {
             // TODO: 从输入读取字符串，在内存池分配，返回 Var::String(ptr)
             todo!()
+        }
+        ValueType::VoidPtr => {
+            Ok(Var::VoidPtr(crate::env::Pos(hex::hex_to_usize(input, cursor_pos)?)))
         }
         ValueType::Ptr(inner) => {
             // TODO: 读取指针位置，构造 TypedPtr

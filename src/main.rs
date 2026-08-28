@@ -48,10 +48,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let filename = match args.get(1) {
         Some(file) => file.clone(),
         None => {
-            repl();
-            return Ok(())
-            // println!("No files specified, using 'example.tas'");
-            // "example.tas".to_string()
+            // repl();
+            // return Ok(())
+            println!("No files specified, using 'example.tas'");
+            "example.tas".to_string()
         }
     };
     let file = match std::fs::File::open(&filename) {

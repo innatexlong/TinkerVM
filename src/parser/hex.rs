@@ -81,6 +81,10 @@ pub(crate) fn hex_to_u32<R: std::io::BufRead>(input: &mut R, cursor_pos: &mut as
 pub(crate) fn hex_to_u64<R: std::io::BufRead>(input: &mut R, cursor_pos: &mut asm::CursorPos) -> Result<u64, asm::AsmError> {
     hex_to_uint(input, size_of::<u64>() * 2, cursor_pos)
 }
+#[inline]
+pub(crate) fn hex_to_usize<R: std::io::BufRead>(input: &mut R, cursor_pos: &mut asm::CursorPos) -> Result<usize, asm::AsmError> {
+    hex_to_uint(input, size_of::<usize>() * 2, cursor_pos)
+}
 
 #[inline]
 pub(crate) fn hex_char_to_byte(c: u8) -> Result<u8, Box<dyn std::error::Error>> {

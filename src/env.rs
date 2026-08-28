@@ -43,10 +43,11 @@ impl SymbolTable {
 
 pub struct FuncInfo {
     pub code: std::sync::Arc<Vec<u8>>,
+    pub labels: Vec<u64>,
     // pub ret_type: crate::value::ValueType
     // pub arity: usize,
     // pub args: std::sync::Arc<crate::value::ValueType>,
-    pub constants: std::sync::Arc<[crate::value::Var]>
+    pub constants: Vec<crate::value::Var>
 }
 impl std::fmt::Debug for FuncInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -256,10 +257,7 @@ impl Env {
     pub fn get_func(
         &self,
         id: &FuncPtr,
-    ) -> Result<
-        std::sync::Arc<FuncInfo>,
-        crate::exceptions::Error,
-    > {
+    ) -> Result<std::sync::Arc<FuncInfo>, crate::exceptions::Error> {
         if let Some(func) = self.funcs.get(id) {
             return Ok(func.clone());
         }
@@ -279,6 +277,7 @@ impl Env {
         &self,
         id: FuncPtr,
         input: Vec<u8>,
+        labels: Vec<u64>,
         constants: Vec<crate::value::Var>
     ) -> Result<(), crate::exceptions::Error> {  // 或者自定义错误类型
         match self.funcs.entry(id) {
@@ -298,7 +297,8 @@ impl Env {
                 // entry.insert(std::io::BufReader::new(std::io::Cursor::new(bytes)));
                 let func_info = FuncInfo {
                     code: std::sync::Arc::new(input),
-                    constants: std::sync::Arc::from(constants)
+                    labels,
+                    constants
                 };
                 entry.insert(std::sync::Arc::new(func_info));
                 Ok(())

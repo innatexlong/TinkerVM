@@ -5,12 +5,17 @@ func 1
         u32 2  ; 2
         u32 CAFEBABE  ; 3
     endcp
-    newv u32 1
-    ldc 0
-    ldc 1
-    add
-    dup
-    mul
+    newv u32 0
+    ldc 2      ; 压入 2（可能未使用，先压着）
+    ldc 1      ; 压入 5
+    ldc 0      ; 压入 31
+    div        ; 31 / 5 = 6, 栈: [2, 6]
+    storevar 0 ; 变量0 = 6，栈: [2, 6]（未弹出）
+    pop        ; 清掉栈顶的 6，让栈干净，栈: [2]
+    ldc 1      ; 栈: [2, 5]
+    bitor      ; 5 | 2 = 7，栈: [7]
+    pushvar 0  ; 栈: [7, 6]
+    mod        ; 6 % 7 = 6（注意顺序：栈顶是 6，次顶是 7，计算 6 % 7）
     popret
 endfunc
 
@@ -18,9 +23,6 @@ func 0
     cp
         u32 0A  ; 0
     endcp
-    newv u32 1
     call 1
-    ldc 0
-    mul
     popret
 endfunc
